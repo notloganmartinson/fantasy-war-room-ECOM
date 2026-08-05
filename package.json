@@ -4,18 +4,28 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "concurrently -k -n frontend,backend -c cyan,magenta \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "vite",
+    "dev:backend": "tsx watch server/src/index.ts",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc -p tsconfig.json && tsc -p server/tsconfig.json",
+    "test": "tsx --test server/test/**/*.test.ts",
+    "start:backend": "tsx server/src/index.ts",
     "preview": "vite preview",
     "check:adyen": "tsx server/src/check-adyen.ts"
   },
   "devDependencies": {
+    "@types/express": "5.0.3",
     "@types/node": "^26.1.2",
+    "concurrently": "9.2.0",
     "tsx": "^4.23.8",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   },
   "dependencies": {
-    "dotenv": "^17.4.2"
+    "@adyen/adyen-web": "6.42.0",
+    "@adyen/api-library": "32.0.0",
+    "dotenv": "^17.4.2",
+    "express": "5.1.0"
   }
 }

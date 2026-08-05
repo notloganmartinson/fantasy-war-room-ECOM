@@ -1,60 +1,276 @@
-import './style.css'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import { setupCounter } from './counter.ts'
+import { AdyenCheckout, Dropin } from "@adyen/adyen-web/auto";
+import "@adyen/adyen-web/styles/adyen.css";
+import "./style.css";
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+interface PublicConfig {
+  environment: "test";
+  clientKey: string;
+}
 
-<div class="ticks"></div>
+interface SessionResponse {
+  session: {
+    id: string;
+    sessionData: string;
+    reference: string;
+  };
+}
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+interface ErrorResponse {
+  error?: {
+    message?: string;
+  };
+}
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+function requireElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+  if (!element) {
+    throw new Error(`Required element was not found: ${selector}`);
+  }
+
+  return element;
+}
+
+const app = requireElement<HTMLDivElement>("#app");
+
+app.innerHTML = `
+  <main class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Fantasy War Room home">
+        <span class="brand-mark" aria-hidden="true">FWR</span>
+        <span>Fantasy War Room</span>
+      </a>
+      <span class="test-badge">Adyen TEST</span>
+    </header>
+
+    <section class="product-layout" aria-labelledby="product-title">
+      <div class="product-story">
+        <p class="eyebrow">2026 Draft season</p>
+        <h1 id="product-title">Build your board.<br />Own the room.</h1>
+        <p class="lede">The Fantasy War Room 2026 Draft Pass is a fictional product created to demonstrate a secure Adyen test checkout.</p>
+
+        <ul class="feature-list" aria-label="Draft Pass highlights">
+          <li><span aria-hidden="true">01</span> One-time TEST checkout</li>
+          <li><span aria-hidden="true">02</span> Adyen Web Drop-in</li>
+          <li><span aria-hidden="true">03</span> No premium access is activated</li>
+        </ul>
+      </div>
+
+      <aside class="purchase-card" aria-labelledby="purchase-title">
+        <div class="card-visual" aria-hidden="true">
+          <span>2026</span>
+          <strong>Draft<br />Pass</strong>
+          <small>TEST EDITION</small>
+        </div>
+
+        <div class="purchase-summary">
+          <div>
+            <p class="product-kicker">Digital pass · TEST only</p>
+            <h2 id="purchase-title">Fantasy War Room 2026 Draft Pass</h2>
+          </div>
+          <p class="price"><span>$10</span><sup>.00 USD</sup></p>
+        </div>
+
+        <div id="checkout-status" class="status" role="status" aria-live="polite">
+          <strong>Safe test checkout</strong>
+          <span>Use an Adyen test card. No real money will be charged.</span>
+        </div>
+
+        <button id="checkout-button" class="checkout-button" type="button">
+          Begin TEST checkout <span aria-hidden="true">→</span>
+        </button>
+
+        <div id="dropin-container" class="dropin-container" hidden></div>
+      </aside>
+    </section>
+
+    <footer>
+      <span>Portfolio integration lab</span>
+      <span>Payments powered by Adyen TEST</span>
+    </footer>
+  </main>
+`;
+
+const checkoutButton = requireElement<HTMLButtonElement>("#checkout-button");
+const status = requireElement<HTMLDivElement>("#checkout-status");
+const dropinContainer = requireElement<HTMLDivElement>("#dropin-container");
+
+let dropin: Dropin | undefined;
+const SESSION_STORAGE_KEY = "fwr-adyen-test-session";
+
+function setStatus(kind: "info" | "loading" | "success" | "error", title: string, detail: string): void {
+  status.dataset.kind = kind;
+  status.innerHTML = `<strong>${title}</strong><span>${detail}</span>`;
+}
+
+function isPublicConfig(value: unknown): value is PublicConfig {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "environment" in value &&
+    value.environment === "test" &&
+    "clientKey" in value &&
+    typeof value.clientKey === "string" &&
+    value.clientKey.startsWith("test_")
+  );
+}
+
+function isSessionResponse(value: unknown): value is SessionResponse {
+  if (typeof value !== "object" || value === null || !("session" in value)) {
+    return false;
+  }
+
+  const session = value.session;
+  return (
+    typeof session === "object" &&
+    session !== null &&
+    "id" in session &&
+    typeof session.id === "string" &&
+    "sessionData" in session &&
+    typeof session.sessionData === "string" &&
+    "reference" in session &&
+    typeof session.reference === "string"
+  );
+}
+
+async function parseResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+async function configureCheckout(
+  config: PublicConfig,
+  sessionResponse: SessionResponse,
+) {
+  return AdyenCheckout({
+    environment: config.environment,
+    clientKey: config.clientKey,
+    countryCode: "US",
+    locale: "en-US",
+    session: {
+      id: sessionResponse.session.id,
+      sessionData: sessionResponse.session.sessionData,
+    },
+    onPaymentCompleted(result) {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      setStatus(
+        "success",
+        "TEST payment completed",
+        `Adyen reported ${result?.resultCode ?? "a completed result"}. No premium access was activated.`,
+      );
+    },
+    onPaymentFailed(result) {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      setStatus(
+        "error",
+        "TEST payment was not completed",
+        `Adyen reported ${result?.resultCode ?? "a failed result"}. You can reload and try another test card.`,
+      );
+    },
+    onError(error) {
+      setStatus(
+        "error",
+        "Checkout error",
+        error.name === "NETWORK_ERROR"
+          ? "The TEST payment network could not be reached. Please try again."
+          : "The TEST checkout could not continue. Please reload and try again.",
+      );
+    },
+  });
+}
+
+async function beginCheckout(): Promise<void> {
+  checkoutButton.disabled = true;
+  setStatus("loading", "Preparing secure checkout…", "Creating an Adyen TEST session.");
+
+  try {
+    const [configResponse, sessionResponse] = await Promise.all([
+      fetch("/api/checkout/config"),
+      fetch("/api/checkout/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+    ]);
+    const [configBody, sessionBody] = await Promise.all([
+      parseResponse(configResponse),
+      parseResponse(sessionResponse),
+    ]);
+
+    if (!configResponse.ok || !isPublicConfig(configBody)) {
+      throw new Error("The public TEST checkout configuration is unavailable.");
+    }
+
+    if (!sessionResponse.ok || !isSessionResponse(sessionBody)) {
+      const message = (sessionBody as ErrorResponse | undefined)?.error?.message;
+      throw new Error(message ?? "The TEST checkout session is unavailable.");
+    }
+
+    dropin?.unmount();
+    dropinContainer.replaceChildren();
+    dropinContainer.hidden = false;
+    checkoutButton.hidden = true;
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionBody));
+
+    const checkout = await configureCheckout(configBody, sessionBody);
+
+    dropin = new Dropin(checkout, {
+      paymentMethodsConfiguration: {
+        card: {
+          hasHolderName: true,
+          holderNameRequired: true,
+        },
+      },
+    });
+    dropin.mount(dropinContainer);
+    setStatus(
+      "info",
+      "Adyen TEST checkout ready",
+      `Session ${sessionBody.session.reference}. No real money will be charged.`,
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "The TEST checkout could not be started.";
+    setStatus("error", "Unable to start checkout", message);
+    checkoutButton.disabled = false;
+  }
+}
+
+async function resumeRedirectIfPresent(): Promise<void> {
+  const redirectResult = new URLSearchParams(window.location.search).get("redirectResult");
+
+  if (!redirectResult) {
+    return;
+  }
+
+  checkoutButton.hidden = true;
+  setStatus("loading", "Completing TEST checkout…", "Validating the redirect result with Adyen.");
+
+  try {
+    const storedValue = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const storedSession: unknown = storedValue ? JSON.parse(storedValue) : undefined;
+    const configResponse = await fetch("/api/checkout/config");
+    const configBody = await parseResponse(configResponse);
+
+    if (!isSessionResponse(storedSession) || !configResponse.ok || !isPublicConfig(configBody)) {
+      throw new Error("The original TEST checkout session is no longer available.");
+    }
+
+    const checkout = await configureCheckout(configBody, storedSession);
+    window.history.replaceState({}, "", window.location.pathname);
+    checkout.submitDetails({ details: { redirectResult } });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "The redirect could not be completed.";
+    setStatus("error", "Unable to complete checkout", message);
+    checkoutButton.hidden = false;
+    checkoutButton.disabled = false;
+  }
+}
+
+checkoutButton.addEventListener("click", () => {
+  void beginCheckout();
+});
+
+void resumeRedirectIfPresent();
