@@ -1,5 +1,10 @@
 import { AdyenCheckout, Dropin } from "@adyen/adyen-web/auto";
 import "@adyen/adyen-web/styles/adyen.css";
+import {
+  removeRedirectResult,
+  renderCheckoutStatus,
+  resetFailedCheckout,
+} from "./checkout-ui";
 import "./style.css";
 
 interface PublicConfig {
@@ -98,9 +103,21 @@ const dropinContainer = requireElement<HTMLDivElement>("#dropin-container");
 let dropin: Dropin | undefined;
 const SESSION_STORAGE_KEY = "fwr-adyen-test-session";
 
-function setStatus(kind: "info" | "loading" | "success" | "error", title: string, detail: string): void {
-  status.dataset.kind = kind;
-  status.innerHTML = `<strong>${title}</strong><span>${detail}</span>`;
+function logDeveloperError(context: string, error: unknown): void {
+  const diagnostic =
+    error instanceof Error
+      ? { name: error.name, type: "Error" }
+      : { name: "UnknownError", type: typeof error };
+
+  console.error(context, diagnostic);
+}
+
+function clearRedirectResult(): void {
+  window.history.replaceState(
+    {},
+    "",
+    removeRedirectResult(window.location.href),
+  );
 }
 
 function isPublicConfig(value: unknown): value is PublicConfig {
@@ -156,7 +173,9 @@ async function configureCheckout(
     },
     onPaymentCompleted(result) {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      setStatus(
+      clearRedirectResult();
+      renderCheckoutStatus(
+        status,
         "success",
         "TEST payment completed",
         `Adyen reported ${result?.resultCode ?? "a completed result"}. No premium access was activated.`,
@@ -164,14 +183,18 @@ async function configureCheckout(
     },
     onPaymentFailed(result) {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      setStatus(
+      clearRedirectResult();
+      renderCheckoutStatus(
+        status,
         "error",
         "TEST payment was not completed",
         `Adyen reported ${result?.resultCode ?? "a failed result"}. You can reload and try another test card.`,
       );
     },
     onError(error) {
-      setStatus(
+      logDeveloperError("Adyen checkout error", error);
+      renderCheckoutStatus(
+        status,
         "error",
         "Checkout error",
         error.name === "NETWORK_ERROR"
@@ -184,7 +207,12 @@ async function configureCheckout(
 
 async function beginCheckout(): Promise<void> {
   checkoutButton.disabled = true;
-  setStatus("loading", "Preparing secure checkout…", "Creating an Adyen TEST session.");
+  renderCheckoutStatus(
+    status,
+    "loading",
+    "Preparing secure checkout…",
+    "Creating an Adyen TEST session.",
+  );
 
   try {
     const [configResponse, sessionResponse] = await Promise.all([
@@ -226,15 +254,23 @@ async function beginCheckout(): Promise<void> {
       },
     });
     dropin.mount(dropinContainer);
-    setStatus(
+    renderCheckoutStatus(
+      status,
       "info",
       "Adyen TEST checkout ready",
-      `Session ${sessionBody.session.reference}. No real money will be charged.`,
+      "Use an Adyen test card. No real money will be charged.",
     );
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "The TEST checkout could not be started.";
-    setStatus("error", "Unable to start checkout", message);
-    checkoutButton.disabled = false;
+    logDeveloperError("Checkout initialization failed", error);
+    resetFailedCheckout(checkoutButton, dropinContainer, dropin);
+    dropin = undefined;
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    renderCheckoutStatus(
+      status,
+      "error",
+      "Unable to start checkout",
+      "The TEST checkout could not be started. Please try again.",
+    );
   }
 }
 
@@ -246,7 +282,12 @@ async function resumeRedirectIfPresent(): Promise<void> {
   }
 
   checkoutButton.hidden = true;
-  setStatus("loading", "Completing TEST checkout…", "Validating the redirect result with Adyen.");
+  renderCheckoutStatus(
+    status,
+    "loading",
+    "Completing TEST checkout…",
+    "Validating the redirect result with Adyen.",
+  );
 
   try {
     const storedValue = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -259,11 +300,15 @@ async function resumeRedirectIfPresent(): Promise<void> {
     }
 
     const checkout = await configureCheckout(configBody, storedSession);
-    window.history.replaceState({}, "", window.location.pathname);
     checkout.submitDetails({ details: { redirectResult } });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "The redirect could not be completed.";
-    setStatus("error", "Unable to complete checkout", message);
+    logDeveloperError("Redirect completion failed", error);
+    renderCheckoutStatus(
+      status,
+      "error",
+      "Unable to complete checkout",
+      "The TEST checkout could not be completed. Reload to retry.",
+    );
     checkoutButton.hidden = false;
     checkoutButton.disabled = false;
   }
